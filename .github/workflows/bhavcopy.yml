@@ -1,0 +1,30 @@
+name: Fetch NSE Bhavcopy
+
+on:
+  schedule:
+    # All times UTC. IST = UTC + 5:30.
+    - cron: '30 16 * * 1-5'   # 10:00 PM IST -- original attempt
+    - cron: '0 17 * * 1-5'    # 10:30 PM IST -- retry 1
+    - cron: '0 18 * * 1-5'    # 11:30 PM IST -- retry 2
+  workflow_dispatch: {}        # allows manual "Run workflow" from the Actions tab
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run fetch script
+        env:
+          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          DATA_REPO: amol-bendre/nifty-oi-data
+        run: python fetch_bhavcopy.py
