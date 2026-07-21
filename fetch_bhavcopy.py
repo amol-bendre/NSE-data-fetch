@@ -50,6 +50,9 @@ GH_HEADERS = {
 
 
 def today_ist() -> date:
+    override = os.environ.get("TARGET_DATE", "").strip()
+    if override:
+        return date.fromisoformat(override)
     return datetime.now(IST).date()
 
 
