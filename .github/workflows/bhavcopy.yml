@@ -31,6 +31,6 @@ jobs:
       - name: Run fetch script
         env:
           DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
-          DATA_REPO: amol-bendre/nifty-oi-data
+          DATA_REPO: amol-bendre/stock-market-data
           TARGET_DATE: ${{ github.event.inputs.date }}
         run: python fetch_bhavcopy.py
