@@ -1,2 +1,2 @@
-# NSE-bhavecopy-fetch
+# NSE-bhavcopy-fetch
 Fetch daily option bhavcopy
