@@ -1,13 +1,14 @@
 """
 Runs on GitHub Actions (see .github/workflows/bhavcopy.yml), independent of
 Render entirely. Fetches that trading day's NSE F&O bhavcopy, stores the
-full file in the private data repo under bhavcopy/, and appends the day's
-real 15:31 closing-summary row to that day's data/{date}.csv.
+full file in the shared data repo under options-bhavcopy/, and appends the
+day's real 15:31 closing-summary row to that day's nifty-open-interest/oi_{date}.csv.
 
-Everything this script needs comes from the private repo itself via the
+Everything this script needs comes from the shared repo itself via the
 GitHub API -- it never talks to the live Flask app or Render at all:
-  - Anchor + tracked strikes for today: read from today's own data/{date}.csv,
-    which the main app has already been writing to all day (the 09:14 row).
+  - Anchor + tracked strikes for today: read from today's own
+    nifty-open-interest/oi_{date}.csv, which the main app has already been
+    writing to all day (the 09:14 row).
   - Expiry for today: derived from the bhavcopy's own expiry listing (the
     nearest listed expiry >= today), same rule locked in the main spec.
 
@@ -28,7 +29,7 @@ from datetime import date, datetime, timedelta, timezone
 import requests
 
 # ---- Config -----------------------------------------------------------
-DATA_REPO = os.environ.get("DATA_REPO", "amol-bendre/nifty-oi-data")
+DATA_REPO = os.environ.get("DATA_REPO", "amol-bendre/stock-market-data")
 TOKEN = os.environ["DATA_REPO_TOKEN"]  # GitHub Actions secret, write access to DATA_REPO
 IST = timezone(timedelta(hours=5, minutes=30))
 RETENTION_DAYS = 90
@@ -155,7 +156,7 @@ def nearest_expiry(expiries, d: date):
 
 # ---- Step 1: cache full bhavcopy to bhavcopy/{date}.csv ----------------
 def ensure_bhavcopy_cached(d: date):
-    path = f"bhavcopy/{d}.csv"
+    path = f"options-bhavcopy/fno_bhavcopy_{d}.csv"
     existing = gh_fetch_raw(path)
     if existing is not None:
         print(f"[bhavcopy] {path} already cached, skipping fetch")
@@ -174,22 +175,23 @@ def ensure_bhavcopy_cached(d: date):
 
 def cleanup_old_bhavcopies(today: date):
     cutoff = today - timedelta(days=RETENTION_DAYS)
-    for entry in gh_list_dir("bhavcopy"):
+    PREFIX, SUFFIX = "fno_bhavcopy_", ".csv"
+    for entry in gh_list_dir("options-bhavcopy"):
         name = entry["name"]
-        if not name.endswith(".csv"):
+        if not (name.startswith(PREFIX) and name.endswith(SUFFIX)):
             continue
         try:
-            d = date.fromisoformat(name[:-4])
+            d = date.fromisoformat(name[len(PREFIX):-len(SUFFIX)])
         except ValueError:
             continue
         if d < cutoff:
-            gh_delete_file(f"bhavcopy/{name}", entry["sha"], f"Retention cleanup: remove {name}")
-            print(f"[cleanup] deleted bhavcopy/{name} (older than {RETENTION_DAYS} days)")
+            gh_delete_file(f"options-bhavcopy/{name}", entry["sha"], f"Retention cleanup: remove {name}")
+            print(f"[cleanup] deleted options-bhavcopy/{name} (older than {RETENTION_DAYS} days)")
 
 
 # ---- Step 2: append today's real 15:31 row into data/{date}.csv --------
 def ensure_1531_row(d: date):
-    data_path = f"data/{d}.csv"
+    data_path = f"nifty-open-interest/oi_{d}.csv"
     content = gh_fetch_raw(data_path)
     if content is None:
         print(f"[15:31] {data_path} not found yet (live app may not have pushed today's data) -- skipping")
@@ -206,16 +208,16 @@ def ensure_1531_row(d: date):
         print(f"[15:31] no 09:14 anchor rows found in {data_path} -- skipping")
         return
 
-    bhav_content = gh_fetch_raw(f"bhavcopy/{d}.csv")
+    bhav_content = gh_fetch_raw(f"options-bhavcopy/fno_bhavcopy_{d}.csv")
     if bhav_content is None:
-        print(f"[15:31] bhavcopy/{d}.csv not available -- skipping")
+        print(f"[15:31] options-bhavcopy/fno_bhavcopy_{d}.csv not available -- skipping")
         return
     own_bhav, own_expiries = parse_nifty_ido(bhav_content)
     if not own_expiries:
         # Defensive: covers any other reason the bhavcopy came back
         # readable-but-empty, not just the size bug above -- nearest_expiry
         # would otherwise raise on an empty sequence.
-        print(f"[15:31] bhavcopy/{d}.csv had no usable NIFTY rows -- skipping")
+        print(f"[15:31] options-bhavcopy/fno_bhavcopy_{d}.csv had no usable NIFTY rows -- skipping")
         return
     expiry_today = nearest_expiry(own_expiries, d)
 
