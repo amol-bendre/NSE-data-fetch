@@ -57,15 +57,40 @@ def today_ist() -> date:
 
 
 # ---- GitHub Contents API helpers --------------------------------------
-def gh_get_file(path):
-    """Returns (content_str, sha) or (None, None) if not found."""
+def gh_fetch_raw(path):
+    """
+    Returns the file's raw text content, or None if not found.
+
+    GitHub's Contents API only returns content inline (base64, in the JSON
+    'content' field) for files 1 MB or smaller -- for anything larger, that
+    field comes back silently EMPTY while the request still reports success
+    (200). Every bhavcopy/{date}.csv file is ~7 MB, so the old approach
+    here (base64.b64decode(j["content"])) would always decode to an empty
+    string rather than raise an error -- and since an empty string is not
+    None, the calling code's "not found" check would never catch it,
+    letting it proceed straight into a crash further downstream instead of
+    failing cleanly.
+
+    Requesting the 'raw' media type bypasses the inline-JSON envelope
+    entirely and returns the actual file bytes directly -- correct for any
+    file up to 100 MB, regardless of size.
+    """
+    headers = {**GH_HEADERS, "Accept": "application/vnd.github.v3.raw"}
+    r = requests.get(f"{GH_API}/repos/{DATA_REPO}/contents/{path}", headers=headers, timeout=30)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return r.text
+
+def gh_get_sha(path):
+    """Returns the file's current sha (needed to update it via PUT), or
+    None if not found. Independent of file size, since the sha is always
+    present in the JSON envelope regardless of content-field length."""
     r = requests.get(f"{GH_API}/repos/{DATA_REPO}/contents/{path}", headers=GH_HEADERS, timeout=15)
     if r.status_code == 404:
-        return None, None
+        return None
     r.raise_for_status()
-    j = r.json()
-    content = base64.b64decode(j["content"]).decode("utf-8")
-    return content, j["sha"]
+    return r.json().get("sha")
 
 
 def gh_put_file(path, content_str, message, sha=None):
@@ -131,7 +156,7 @@ def nearest_expiry(expiries, d: date):
 # ---- Step 1: cache full bhavcopy to bhavcopy/{date}.csv ----------------
 def ensure_bhavcopy_cached(d: date):
     path = f"bhavcopy/{d}.csv"
-    existing, _ = gh_get_file(path)
+    existing = gh_fetch_raw(path)
     if existing is not None:
         print(f"[bhavcopy] {path} already cached, skipping fetch")
         return True
@@ -165,10 +190,11 @@ def cleanup_old_bhavcopies(today: date):
 # ---- Step 2: append today's real 15:31 row into data/{date}.csv --------
 def ensure_1531_row(d: date):
     data_path = f"data/{d}.csv"
-    content, sha = gh_get_file(data_path)
+    content = gh_fetch_raw(data_path)
     if content is None:
         print(f"[15:31] {data_path} not found yet (live app may not have pushed today's data) -- skipping")
         return
+    sha = gh_get_sha(data_path)
 
     rows = list(csv.DictReader(content.splitlines()))
     if any(r["time"] == "15:31" for r in rows):
@@ -180,11 +206,17 @@ def ensure_1531_row(d: date):
         print(f"[15:31] no 09:14 anchor rows found in {data_path} -- skipping")
         return
 
-    bhav_content, _ = gh_get_file(f"bhavcopy/{d}.csv")
+    bhav_content = gh_fetch_raw(f"bhavcopy/{d}.csv")
     if bhav_content is None:
         print(f"[15:31] bhavcopy/{d}.csv not available -- skipping")
         return
     own_bhav, own_expiries = parse_nifty_ido(bhav_content)
+    if not own_expiries:
+        # Defensive: covers any other reason the bhavcopy came back
+        # readable-but-empty, not just the size bug above -- nearest_expiry
+        # would otherwise raise on an empty sequence.
+        print(f"[15:31] bhavcopy/{d}.csv had no usable NIFTY rows -- skipping")
+        return
     expiry_today = nearest_expiry(own_expiries, d)
 
     new_rows = []
