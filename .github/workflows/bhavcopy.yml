@@ -6,7 +6,12 @@ on:
     - cron: '30 16 * * 1-5'   # 10:00 PM IST -- original attempt
     - cron: '0 17 * * 1-5'    # 10:30 PM IST -- retry 1
     - cron: '0 18 * * 1-5'    # 11:30 PM IST -- retry 2
-  workflow_dispatch: {}        # allows manual "Run workflow" from the Actions tab
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Target date (YYYY-MM-DD). Leave blank to use today (IST).'
+        required: false
+        default: ''
 
 jobs:
   fetch:
@@ -27,4 +32,5 @@ jobs:
         env:
           DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
           DATA_REPO: amol-bendre/nifty-oi-data
+          TARGET_DATE: ${{ github.event.inputs.date }}
         run: python fetch_bhavcopy.py
