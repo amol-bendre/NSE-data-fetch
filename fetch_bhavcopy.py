@@ -262,6 +262,15 @@ def main():
     else:
         print("Skipping 15:31 step -- no bhavcopy available for today")
 
+    # Expose outcome for the separate telegram_alert.py workflow step.
+    # This script does nothing with Telegram itself -- it only reports
+    # what happened so a fully independent script can decide whether to alert.
+    gh_output = os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        with open(gh_output, "a") as f:
+            f.write(f"available={'true' if ok else 'false'}\n")
+            f.write(f"bhav_date={d}\n")
+
 
 if __name__ == "__main__":
     main()
