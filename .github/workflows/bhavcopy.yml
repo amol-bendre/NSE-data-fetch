@@ -3,9 +3,12 @@ name: Fetch NSE Bhavcopy
 on:
   schedule:
     # All times UTC. IST = UTC + 5:30.
-    - cron: '30 16 * * 1-5'   # 10:00 PM IST -- original attempt
-    - cron: '0 17 * * 1-5'    # 10:30 PM IST -- retry 1
-    - cron: '0 18 * * 1-5'    # 11:30 PM IST -- retry 2
+    # Minutes shifted off round numbers (was :30/:00/:00) to avoid the
+    # heaviest GitHub Actions runner-queue contention, which peaks at
+    # :00 and :30 past the hour.
+    - cron: '37 16 * * 1-5'   # 10:07 PM IST -- original attempt
+    - cron: '7 17 * * 1-5'    # 10:37 PM IST -- retry 1
+    - cron: '2 18 * * 1-5'    # 11:32 PM IST -- retry 2 (last attempt)
   workflow_dispatch:
     inputs:
       date:
@@ -29,8 +32,24 @@ jobs:
         run: pip install requests
 
       - name: Run fetch script
+        id: fetch
         env:
           DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
           DATA_REPO: amol-bendre/stock-market-data
           TARGET_DATE: ${{ github.event.inputs.date }}
         run: python fetch_bhavcopy.py
+
+      # Runs regardless of whether the fetch step above succeeded, failed,
+      # or crashed outright -- this is the only step that ever touches
+      # Telegram. It only sends a message on the last scheduled attempt
+      # (11:32 PM IST); manual workflow_dispatch runs never alert, since
+      # github.event.schedule is unset for those.
+      - name: Telegram alert (last attempt only)
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          IS_LAST_ATTEMPT: ${{ github.event.schedule == '2 18 * * 1-5' }}
+          BHAV_AVAILABLE: ${{ steps.fetch.outputs.available }}
+          BHAV_DATE: ${{ steps.fetch.outputs.bhav_date }}
+        run: python telegram_alert.py
