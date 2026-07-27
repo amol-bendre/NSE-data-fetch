@@ -7,9 +7,9 @@ on:
     # anymore, since they're independent jobs in one workflow rather than
     # two separate workflows. Minutes kept off round numbers to avoid
     # GitHub Actions runner-queue contention, which peaks at :00/:30.
-    - cron: '37 16 * * 1-5'   # 10:07 PM IST -- original attempt
-    - cron: '7 17 * * 1-5'    # 10:37 PM IST -- retry 1
-    - cron: '2 18 * * 1-5'    # 11:32 PM IST -- retry 2 (last attempt)
+    - cron: '37 15 * * 1-5'   # 10:07 PM IST -- original attempt
+    - cron: '7 16 * * 1-5'    # 10:37 PM IST -- retry 1
+    - cron: '2 17 * * 1-5'    # 11:32 PM IST -- retry 2 (last attempt)
   workflow_dispatch:
     inputs:
       bhav_date:
