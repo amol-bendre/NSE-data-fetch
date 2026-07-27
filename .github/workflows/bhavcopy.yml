@@ -50,6 +50,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           IS_LAST_ATTEMPT: ${{ github.event.schedule == '2 18 * * 1-5' }}
-          BHAV_AVAILABLE: ${{ steps.fetch.outputs.available }}
-          BHAV_DATE: ${{ steps.fetch.outputs.bhav_date }}
+          JOB_LABEL: "Bhavcopy"
+          STATUS: ${{ steps.fetch.outputs.available == 'true' && 'success' || 'failure' }}
+          REPORT_DATE: ${{ steps.fetch.outputs.bhav_date }}
         run: python telegram_alert.py
