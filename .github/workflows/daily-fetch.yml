@@ -1,0 +1,119 @@
+name: Daily NSE Data Fetch
+
+on:
+  schedule:
+    # All times UTC. IST = UTC + 5:30. Both jobs below run in parallel on
+    # every one of these 3 attempts -- no offset needed between them
+    # anymore, since they're independent jobs in one workflow rather than
+    # two separate workflows. Minutes kept off round numbers to avoid
+    # GitHub Actions runner-queue contention, which peaks at :00/:30.
+    - cron: '37 16 * * 1-5'   # 10:07 PM IST -- original attempt
+    - cron: '7 17 * * 1-5'    # 10:37 PM IST -- retry 1
+    - cron: '2 18 * * 1-5'    # 11:32 PM IST -- retry 2 (last attempt)
+  workflow_dispatch:
+    inputs:
+      bhav_date:
+        description: 'Bhavcopy: target date (YYYY-MM-DD). Leave blank for today (IST).'
+        required: false
+        default: ''
+      fii_date:
+        description: 'FII reports: single target date (YYYY-MM-DD). Leave blank for today (IST).'
+        required: false
+        default: ''
+      fii_start_date:
+        description: 'FII reports backfill: range start (YYYY-MM-DD). Requires fii_end_date too.'
+        required: false
+        default: ''
+      fii_end_date:
+        description: 'FII reports backfill: range end (YYYY-MM-DD, inclusive). Requires fii_start_date too.'
+        required: false
+        default: ''
+
+jobs:
+  bhavcopy:
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.fetch.outputs.available }}
+      bhav_date: ${{ steps.fetch.outputs.bhav_date }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run fetch script
+        id: fetch
+        env:
+          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          DATA_REPO: amol-bendre/stock-market-data
+          TARGET_DATE: ${{ github.event.inputs.bhav_date }}
+        run: python fetch_bhavcopy.py
+
+  fii:
+    runs-on: ubuntu-latest
+    outputs:
+      fii_stats_ok: ${{ steps.fetch.outputs.fii_stats_ok }}
+      participant_oi_ok: ${{ steps.fetch.outputs.participant_oi_ok }}
+      fii_date: ${{ steps.fetch.outputs.fii_date }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run fetch script
+        id: fetch
+        env:
+          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          DATA_REPO: amol-bendre/stock-market-data
+          TARGET_DATE: ${{ github.event.inputs.fii_date }}
+          START_DATE: ${{ github.event.inputs.fii_start_date }}
+          END_DATE: ${{ github.event.inputs.fii_end_date }}
+        run: python fetch_fii_derivatives.py
+
+  # Waits for both fetch jobs regardless of their outcome (if: always()
+  # overrides the default "needs must succeed" behavior), then sends ONE
+  # combined Telegram message -- only on the shared last scheduled attempt
+  # (11:32 PM IST). Manual workflow_dispatch runs never alert, since
+  # github.event.schedule is unset for those.
+  alert:
+    needs: [bhavcopy, fii]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Telegram alert (last attempt only, combined)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          IS_LAST_ATTEMPT: ${{ github.event.schedule == '2 18 * * 1-5' }}
+          JOB1_LABEL: "Bhavcopy"
+          JOB1_STATUS: ${{ needs.bhavcopy.outputs.available == 'true' && 'success' || 'failure' }}
+          JOB1_DATE: ${{ needs.bhavcopy.outputs.bhav_date }}
+          JOB2_LABEL: "FII Reports"
+          JOB2_STATUS: ${{ (needs.fii.outputs.fii_stats_ok == 'true' && needs.fii.outputs.participant_oi_ok == 'true') && 'success' || ((needs.fii.outputs.fii_stats_ok == 'true' || needs.fii.outputs.participant_oi_ok == 'true') && 'partial' || 'failure') }}
+          JOB2_DETAIL: ${{ needs.fii.outputs.fii_stats_ok != 'true' && 'FII Derivatives Statistics missing' || (needs.fii.outputs.participant_oi_ok != 'true' && 'Participant-wise OI missing' || '') }}
+          JOB2_DATE: ${{ needs.fii.outputs.fii_date }}
+        run: python telegram_alert.py
