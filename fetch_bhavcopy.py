@@ -2,7 +2,7 @@
 Runs on GitHub Actions (see .github/workflows/bhavcopy.yml), independent of
 Render entirely. Fetches that trading day's NSE F&O bhavcopy, stores the
 full file in the shared data repo under options-bhavcopy/, and appends the
-day's real 15:31 closing-summary row to that day's nifty-open-interest/oi_{date}.csv.
+day's real 15:51 closing-summary row to that day's nifty-open-interest/oi_{date}.csv.
 
 Everything this script needs comes from the shared repo itself via the
 GitHub API -- it never talks to the live Flask app or Render at all:
@@ -189,35 +189,35 @@ def cleanup_old_bhavcopies(today: date):
             print(f"[cleanup] deleted options-bhavcopy/{name} (older than {RETENTION_DAYS} days)")
 
 
-# ---- Step 2: append today's real 15:31 row into data/{date}.csv --------
-def ensure_1531_row(d: date):
+# ---- Step 2: append today's real 15:51 row into data/{date}.csv --------
+def ensure_1551_row(d: date):
     data_path = f"nifty-open-interest/oi_{d}.csv"
     content = gh_fetch_raw(data_path)
     if content is None:
-        print(f"[15:31] {data_path} not found yet (live app may not have pushed today's data) -- skipping")
+        print(f"[15:51] {data_path} not found yet (live app may not have pushed today's data) -- skipping")
         return
     sha = gh_get_sha(data_path)
 
     rows = list(csv.DictReader(content.splitlines()))
-    if any(r["time"] == "15:31" for r in rows):
-        print(f"[15:31] {data_path} already has a 15:31 row, skipping")
+    if any(r["time"] == "15:51" for r in rows):
+        print(f"[15:51] {data_path} already has a 15:51 row, skipping")
         return
 
     anchor_rows = [r for r in rows if r["time"] == "09:14"]
     if not anchor_rows:
-        print(f"[15:31] no 09:14 anchor rows found in {data_path} -- skipping")
+        print(f"[15:51] no 09:14 anchor rows found in {data_path} -- skipping")
         return
 
     bhav_content = gh_fetch_raw(f"options-bhavcopy/fno_bhavcopy_{d}.csv")
     if bhav_content is None:
-        print(f"[15:31] options-bhavcopy/fno_bhavcopy_{d}.csv not available -- skipping")
+        print(f"[15:51] options-bhavcopy/fno_bhavcopy_{d}.csv not available -- skipping")
         return
     own_bhav, own_expiries = parse_nifty_ido(bhav_content)
     if not own_expiries:
         # Defensive: covers any other reason the bhavcopy came back
         # readable-but-empty, not just the size bug above -- nearest_expiry
         # would otherwise raise on an empty sequence.
-        print(f"[15:31] options-bhavcopy/fno_bhavcopy_{d}.csv had no usable NIFTY rows -- skipping")
+        print(f"[15:51] options-bhavcopy/fno_bhavcopy_{d}.csv had no usable NIFTY rows -- skipping")
         return
     expiry_today = nearest_expiry(own_expiries, d)
 
@@ -230,13 +230,13 @@ def ensure_1531_row(d: date):
         if ce is None or pe is None:
             continue
         new_rows.append({
-            "date": str(d), "time": "15:31", "strike": strike, "expiry": expiry_today,
+            "date": str(d), "time": "15:51", "strike": strike, "expiry": expiry_today,
             "call_oi": ce, "put_oi": pe,
             "call_chg": ce - aco, "put_chg": pe - apo, "ticks": 0,
         })
 
     if not new_rows:
-        print(f"[15:31] no matching strikes found in bhavcopy for {d} -- skipping")
+        print(f"[15:51] no matching strikes found in bhavcopy for {d} -- skipping")
         return
 
     fieldnames = list(rows[0].keys()) if rows else \
@@ -246,8 +246,8 @@ def ensure_1531_row(d: date):
     w.writeheader()
     w.writerows(rows + new_rows)
 
-    gh_put_file(data_path, out.getvalue(), f"Add 15:31 closing row for {d}", sha=sha)
-    print(f"[15:31] appended {len(new_rows)} rows to {data_path}")
+    gh_put_file(data_path, out.getvalue(), f"Add 15:51 closing row for {d}", sha=sha)
+    print(f"[15:51] appended {len(new_rows)} rows to {data_path}")
 
 
 def main():
@@ -258,9 +258,9 @@ def main():
     cleanup_old_bhavcopies(d)
 
     if ok:
-        ensure_1531_row(d)
+        ensure_1551_row(d)
     else:
-        print("Skipping 15:31 step -- no bhavcopy available for today")
+        print("Skipping 15:51 step -- no bhavcopy available for today")
 
     # Expose outcome for the separate telegram_alert.py workflow step.
     # This script does nothing with Telegram itself -- it only reports
