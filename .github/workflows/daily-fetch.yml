@@ -1,13 +1,6 @@
 name: Daily NSE Data Fetch
 
 on:
-  schedule:
-    # All times UTC. IST = UTC + 5:30. Both fetch jobs run in parallel on
-    # every attempt below. Minutes kept off round numbers to avoid GitHub
-    # Actions runner-queue contention, which peaks at :00/:30.
-    - cron: '37 15 * * 1-5'   # 9:07 PM IST -- original attempt
-    - cron: '7 16 * * 1-5'    # 9:37 PM IST -- retry 1
-    - cron: '2 17 * * 1-5'    # 10:32 PM IST -- retry 2 (last attempt)
   workflow_dispatch:
     inputs:
       bhav_date:
@@ -26,17 +19,21 @@ on:
         description: 'FII reports backfill: range end (YYYY-MM-DD, inclusive). Requires fii_start_date too.'
         required: false
         default: ''
+      is_last_attempt:
+        description: 'Set to true by the relay ONLY on the final attempt of the day (the others should stay false). Controls whether the combined Telegram alert is sent.'
+        required: false
+        default: 'false'
 
 jobs:
-  # Computes the IST trading date each scheduled run should target, so a
-  # run delayed past midnight IST by GitHub's runner queue still completes
-  # the PREVIOUS evening's job instead of rolling over to fetch a date that
-  # hasn't traded yet. None of the 3 scheduled attempts above ever legitimately
-  # intend to land between midnight and 6 AM IST -- if a run wakes up in that
-  # window, it's a delayed run of the prior evening's schedule, so it targets
-  # yesterday (IST) instead of today. Manual workflow_dispatch runs with an
-  # explicit date input override this entirely -- see the fallback logic in
-  # the bhavcopy/fii jobs below.
+  # Computes the IST trading date each run should target, so a run that
+  # somehow lands between midnight and 6 AM IST still completes the
+  # PREVIOUS evening's job instead of rolling over to a date that hasn't
+  # traded yet. With the relay now controlling timing directly (each
+  # attempt dispatched at a precise IST time, comfortably before
+  # midnight), this rollover case should be rare in practice -- kept as
+  # a defensive fallback, not the primary safeguard it used to be.
+  # Manual workflow_dispatch runs with an explicit date input override
+  # this entirely -- see the fallback logic in the bhavcopy/fii jobs below.
   compute-date:
     runs-on: ubuntu-latest
     outputs:
@@ -118,11 +115,13 @@ jobs:
           END_DATE: ${{ github.event.inputs.fii_end_date }}
         run: python fetch_fii_derivatives.py
 
-  # Waits for both fetch jobs regardless of their outcome (if: always()
-  # overrides the default "needs must succeed" behavior), then sends ONE
-  # combined Telegram message -- only on the shared last scheduled attempt
-  # (10:32 PM IST). Manual workflow_dispatch runs never alert, since
-  # github.event.schedule is unset for those.
+  # Waits for both fetch jobs regardless of outcome, then sends ONE
+  # combined Telegram message -- but ONLY when this run is explicitly
+  # flagged as the day's final attempt. The relay sets is_last_attempt=true
+  # only on the 3rd dispatch (nse-fetch-3 in relay_jobs_config.csv);
+  # earlier attempts and any manual workflow_dispatch test run default to
+  # false and stay silent, same as the original schedule-string-match
+  # behavior this replaces.
   alert:
     needs: [bhavcopy, fii]
     if: always()
@@ -143,7 +142,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          IS_LAST_ATTEMPT: ${{ github.event.schedule == '2 17 * * 1-5' }}
+          IS_LAST_ATTEMPT: ${{ github.event.inputs.is_last_attempt == 'true' }}
           JOB1_LABEL: "Bhavcopy"
           JOB1_STATUS: ${{ needs.bhavcopy.outputs.available == 'true' && 'success' || 'failure' }}
           JOB1_DATE: ${{ needs.bhavcopy.outputs.bhav_date }}
