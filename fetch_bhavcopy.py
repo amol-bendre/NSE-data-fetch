@@ -4,7 +4,7 @@ Render entirely. Fetches that trading day's NSE F&O bhavcopy, stores the
 full file in the shared data repo under options-bhavcopy/, strips it down
 to a Nifty-only file (options-bhavcopy/nifty-only/) covering just the two
 nearest expiries for the live Render app to fetch cheaply, and appends the
-day's real 15:51 closing-summary row to that day's nifty-open-interest/oi_{date}.csv.
+day's real 15:41 closing-summary row to that day's nifty-open-interest/oi_{date}.csv.
 
 Everything this script needs comes from the shared repo itself via the
 GitHub API -- it never talks to the live Flask app or Render at all:
@@ -16,7 +16,7 @@ GitHub API -- it never talks to the live Flask app or Render at all:
 
 The full bhavcopy is fetched at most once per run (cached in the local
 csv_text variable inside main()) and reused by every step that needs it --
-the Nifty-only strip and the 15:51 row calc both read from that same
+the Nifty-only strip and the 15:41 row calc both read from that same
 content instead of each re-fetching the file independently.
 
 Idempotent by design: every one of the day's 3 scheduled runs (10:00 PM,
@@ -168,7 +168,7 @@ def ensure_bhavcopy_cached(d: date):
     now, or already cached from an earlier run today -- or None if NSE
     hasn't published it yet. Returning the actual content (not just a
     bool, as this used to) means every caller that needs it (the new
-    Nifty-only strip step, the 15:51 row calc) gets it from this single
+    Nifty-only strip step, the 15:41 row calc) gets it from this single
     fetch instead of each independently re-fetching the same file again.
     """
     path = f"options-bhavcopy/fno_bhavcopy_{d}.csv"
@@ -273,23 +273,23 @@ def cleanup_old_nifty_only(today: date):
             print(f"[cleanup] deleted options-bhavcopy/nifty-only/{name} (older than {RETENTION_DAYS} days)")
 
 
-# ---- Step 2: append today's real 15:51 row into data/{date}.csv --------
-def ensure_1551_row(d: date, csv_text: str):
+# ---- Step 2: append today's real 15:41 row into data/{date}.csv --------
+def ensure_1541_row(d: date, csv_text: str):
     data_path = f"nifty-open-interest/oi_{d}.csv"
     content = gh_fetch_raw(data_path)
     if content is None:
-        print(f"[15:51] {data_path} not found yet (live app may not have pushed today's data) -- skipping")
+        print(f"[15:41] {data_path} not found yet (live app may not have pushed today's data) -- skipping")
         return
     sha = gh_get_sha(data_path)
 
     rows = list(csv.DictReader(content.splitlines()))
-    if any(r["time"] == "15:51" for r in rows):
-        print(f"[15:51] {data_path} already has a 15:51 row, skipping")
+    if any(r["time"] == "15:41" for r in rows):
+        print(f"[15:41] {data_path} already has a 15:41 row, skipping")
         return
 
     anchor_rows = [r for r in rows if r["time"] == "09:14"]
     if not anchor_rows:
-        print(f"[15:51] no 09:14 anchor rows found in {data_path} -- skipping")
+        print(f"[15:41] no 09:14 anchor rows found in {data_path} -- skipping")
         return
 
     own_bhav, own_expiries = parse_nifty_ido(csv_text)
@@ -297,7 +297,7 @@ def ensure_1551_row(d: date, csv_text: str):
         # Defensive: covers any other reason the bhavcopy came back
         # readable-but-empty, not just the size bug above -- nearest_expiry
         # would otherwise raise on an empty sequence.
-        print(f"[15:51] today's bhavcopy had no usable NIFTY rows -- skipping")
+        print(f"[15:41] today's bhavcopy had no usable NIFTY rows -- skipping")
         return
     expiry_today = nearest_expiry(own_expiries, d)
 
@@ -310,13 +310,13 @@ def ensure_1551_row(d: date, csv_text: str):
         if ce is None or pe is None:
             continue
         new_rows.append({
-            "date": str(d), "time": "15:51", "strike": strike, "expiry": expiry_today,
+            "date": str(d), "time": "15:41", "strike": strike, "expiry": expiry_today,
             "call_oi": ce, "put_oi": pe,
             "call_chg": ce - aco, "put_chg": pe - apo, "ticks": 0,
         })
 
     if not new_rows:
-        print(f"[15:51] no matching strikes found in bhavcopy for {d} -- skipping")
+        print(f"[15:41] no matching strikes found in bhavcopy for {d} -- skipping")
         return
 
     fieldnames = list(rows[0].keys()) if rows else \
@@ -326,8 +326,8 @@ def ensure_1551_row(d: date, csv_text: str):
     w.writeheader()
     w.writerows(rows + new_rows)
 
-    gh_put_file(data_path, out.getvalue(), f"Add 15:51 closing row for {d}", sha=sha)
-    print(f"[15:51] appended {len(new_rows)} rows to {data_path}")
+    gh_put_file(data_path, out.getvalue(), f"Add 15:41 closing row for {d}", sha=sha)
+    print(f"[15:41] appended {len(new_rows)} rows to {data_path}")
 
 
 def main():
@@ -340,9 +340,9 @@ def main():
 
     if csv_text is not None:
         ensure_nifty_only_cached(d, csv_text)
-        ensure_1551_row(d, csv_text)
+        ensure_1541_row(d, csv_text)
     else:
-        print("Skipping Nifty-only + 15:51 steps -- no bhavcopy available for today")
+        print("Skipping Nifty-only + 15:41 steps -- no bhavcopy available for today")
 
     # Expose outcome for the separate telegram_alert.py workflow step.
     # This script does nothing with Telegram itself -- it only reports
