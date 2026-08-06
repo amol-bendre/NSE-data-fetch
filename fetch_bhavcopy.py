@@ -3,8 +3,12 @@ Runs on GitHub Actions (see .github/workflows/bhavcopy.yml), independent of
 Render entirely. Fetches that trading day's NSE F&O bhavcopy, stores the
 full file in the shared data repo under options-bhavcopy/, strips it down
 to a Nifty-only file (options-bhavcopy/nifty-only/) covering just the two
-nearest expiries for the live Render app to fetch cheaply, and appends the
-day's real 15:41 closing-summary row to that day's nifty-open-interest/oi_{date}.csv.
+nearest expiries for the live Render app to fetch cheaply, appends the
+day's real 15:41 closing-summary row to that day's nifty-open-interest/oi_{date}.csv,
+and cleans up old files past their retention window (90 days for bhavcopy
+files, 3 days for the live app's own intraday chunk files under
+nifty-open-interest/intraday/ -- see INTRADAY_RETENTION_DAYS for why that
+one's so much shorter).
 
 Everything this script needs comes from the shared repo itself via the
 GitHub API -- it never talks to the live Flask app or Render at all:
@@ -40,6 +44,11 @@ DATA_REPO = os.environ.get("DATA_REPO", "amol-bendre/stock-market-data")
 TOKEN = os.environ["DATA_REPO_TOKEN"]  # GitHub Actions secret, write access to DATA_REPO
 IST = timezone(timedelta(hours=5, minutes=30))
 RETENTION_DAYS = 90
+INTRADAY_RETENTION_DAYS = 3  # much shorter than bhavcopy retention -- these files exist purely
+                             # for same-day crash recovery (see cloud_app.py's
+                             # push_chunk_to_github()/_pull_date_into_db()), fully superseded by
+                             # that day's consolidated oi_{date}.csv every single day, never read
+                             # back for any historical purpose the way bhavcopy files sometimes are
 
 NSE_URL = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{ymd}_F_0000.csv.zip"
 NSE_HEADERS = {
@@ -273,6 +282,38 @@ def cleanup_old_nifty_only(today: date):
             print(f"[cleanup] deleted options-bhavcopy/nifty-only/{name} (older than {RETENTION_DAYS} days)")
 
 
+def cleanup_old_intraday_chunks(today: date):
+    """
+    Deletes intraday chunk files (nifty-open-interest/intraday/, written
+    all day by cloud_app.py's push_chunk_to_github()) older than
+    INTRADAY_RETENTION_DAYS. Much shorter window than the other two
+    cleanups here -- see INTRADAY_RETENTION_DAYS's own comment for why.
+
+    Filenames are oi_{date}_{HHMM}.csv -- the trailing _HHMM (added
+    after the date, unlike the other two cleanup targets here) has to
+    be split off before the remaining text is a bare date string.
+    Splitting on the *last* underscore does this correctly: the date
+    portion itself never contains one, so whatever's after the final
+    underscore is always the HHMM part, whatever's before is always the
+    complete date.
+    """
+    cutoff = today - timedelta(days=INTRADAY_RETENTION_DAYS)
+    PREFIX, SUFFIX = "oi_", ".csv"
+    for entry in gh_list_dir("nifty-open-interest/intraday"):
+        name = entry["name"]
+        if not (name.startswith(PREFIX) and name.endswith(SUFFIX)):
+            continue
+        middle = name[len(PREFIX):-len(SUFFIX)]  # e.g. "2026-08-04_1721"
+        date_part = middle.rsplit("_", 1)[0]      # -> "2026-08-04"
+        try:
+            d = date.fromisoformat(date_part)
+        except ValueError:
+            continue
+        if d < cutoff:
+            gh_delete_file(f"nifty-open-interest/intraday/{name}", entry["sha"], f"Retention cleanup: remove {name}")
+            print(f"[cleanup] deleted nifty-open-interest/intraday/{name} (older than {INTRADAY_RETENTION_DAYS} days)")
+
+
 # ---- Step 2: append today's real 15:41 row into data/{date}.csv --------
 def ensure_1541_row(d: date, csv_text: str):
     data_path = f"nifty-open-interest/oi_{d}.csv"
@@ -337,6 +378,7 @@ def main():
     csv_text = ensure_bhavcopy_cached(d)
     cleanup_old_bhavcopies(d)
     cleanup_old_nifty_only(d)
+    cleanup_old_intraday_chunks(d)
 
     if csv_text is not None:
         ensure_nifty_only_cached(d, csv_text)
