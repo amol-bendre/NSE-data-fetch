@@ -44,7 +44,7 @@ DATA_REPO = os.environ.get("DATA_REPO", "amol-bendre/stock-market-data")
 TOKEN = os.environ["DATA_REPO_TOKEN"]  # GitHub Actions secret, write access to DATA_REPO
 IST = timezone(timedelta(hours=5, minutes=30))
 RETENTION_DAYS = 90
-INTRADAY_RETENTION_DAYS = 3  # much shorter than bhavcopy retention -- these files exist purely
+INTRADAY_RETENTION_DAYS = 1  # much shorter than bhavcopy retention -- these files exist purely
                              # for same-day crash recovery (see cloud_app.py's
                              # push_chunk_to_github()/_pull_date_into_db()), fully superseded by
                              # that day's consolidated oi_{date}.csv every single day, never read
